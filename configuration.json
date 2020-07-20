@@ -1,0 +1,10 @@
+[
+    {
+        "id":"5d522f6f16171e56f400246e",
+        "name":"Camera 1",
+        "address":"0",
+        "server_ip":"localhost",
+        "recognition_per_second":5,
+        "fps_update_interval_second":1
+    }
+]
