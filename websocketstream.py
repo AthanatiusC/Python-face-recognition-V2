@@ -64,7 +64,7 @@ def main():
     while True:
         ret,frame = vid.read()
         # ret,frame1 = vid1.read()
-        stream.test("test")
+        # stream.test("test")
         stream.encode.update({"0":frame})
         # stream.encode.update({"1": frame1})
         key = cv2.waitKey(1) & 0xFF

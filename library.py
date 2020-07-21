@@ -12,7 +12,7 @@ import argparse
 import sys
 
 # import websocketstream
-
+datas = []
 class InitDetectionModel:
     def __init__(self, long_dist):
         #VARIABLE DECLARATION
@@ -83,38 +83,17 @@ class Api:
                 address = data["address"]
                 camera_id = data["camera_id"]
                 try:
-                    retval,buffer = cv2.imencode(".png",face )
+                    retval,buffer = cv2.imencode(".jpg",face )
                     string_bytes = b64encode(buffer)
                     data = {"image": string_bytes.decode('utf-8'), "camera_id": camera_id, "embeddings": np.array(vector[0]).astype("float64").tolist()}
                     res = requests.post(url="http://{}:8088/api/v2/user/recognize".format(address), json=data)
-                    self.datas.put(res.json())
+                    # datas.put(res.json())
+                    datas.append(res.json())
+                    # if res != None:
+                    #     self.socketio.emit("result", res.json())
                     # print(res.json())
                 except Exception as e:
                     pass
-
-    def handlesocket(self):
-        @self.socketio.on('connect')
-        def connected():
-            print("User {} connected".format(request.sid))
-            emit("message","Connected to recognition")
-            self.clients.append(request.sid)
-
-        @self.socketio.on('disconnect')
-        def disconnect():
-            print("{} Disconnected".format(request.sid))
-            emit("message","Disconnected from recognition")
-            self.clients.remove(request.sid)
-
-        # def test():
-        #     while request.sid in self.clients:
-        #         if self.datas.not_empty:
-        #             self.socketio.emit("result", self.datas.get(),namespace="")
-
-        # @self.socketio.on("result")
-        # def send():
-        #     t = Thread(target=test)
-        #     t.daemon = True
-        #     t.start()
 
 class Stream:
     def __init__(self,online_camera):
@@ -154,6 +133,8 @@ class Stream:
         @self.socketio.on('stream')
         def upstream(cam_id):
             while request.sid in self.clients:
+                if len(datas) >0:
+                    emit("result",datas.pop())
                 if len(self.frames) > 0:
                     # data = []
                     try:
@@ -165,8 +146,9 @@ class Stream:
                         emit('serverstream{}'.format(cam_id), jpg_as_text.decode("utf-8"))
                         # if detection_result.not_empty:
                         #     emit("result", detection_result.get(), broadcast=True)
-                    except:
+                    except Exception as e:
                         emit('message', 'Camera id doesnt exist')
+                        print(e)
                         return 
                     self.socketio.sleep(0.01)
             return
@@ -285,7 +267,7 @@ class FacialRecognition:
         socket = stream.StartStreaming()
         stream.handle()
         sender = Api(socket)
-        sender.handlesocket()
+        # sender.handlesocket()
         for config in configuration:
             print("Checking {}".format(config["name"]))
             if not self.check_video(config["address"]):
