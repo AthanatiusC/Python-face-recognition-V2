@@ -105,16 +105,16 @@ class Api:
             emit("message","Disconnected from recognition")
             self.clients.remove(request.sid)
 
-        def test():
-            while request.sid in self.clients:
-                if self.datas.not_empty:
-                    self.socketio.emit("result", self.datas.get(),namespace="")
+        # def test():
+        #     while request.sid in self.clients:
+        #         if self.datas.not_empty:
+        #             self.socketio.emit("result", self.datas.get(),namespace="")
 
-        @self.socketio.on("result")
-        def send():
-            t = Thread(target=test)
-            t.daemon = True
-            t.start()
+        # @self.socketio.on("result")
+        # def send():
+        #     t = Thread(target=test)
+        #     t.daemon = True
+        #     t.start()
 
 class Stream:
     def __init__(self,online_camera):
