@@ -1,4 +1,4 @@
-import os,requests, time, pafy, cv2,json
+import os,requests, time,cv2,json
 from flask import Flask, render_template,request
 from flask_socketio import SocketIO, send, emit
 import numpy as np
@@ -52,10 +52,9 @@ class Config:
         return self.configuration
 
 class Api:
-    def __init__(self,socket):
+    def __init__(self):
         self.data_queue = Queue(maxsize=20)
         self.stopped = False
-        self.socketio = socket
         self.clients = []
         self.datas = Queue()
 
@@ -82,24 +81,27 @@ class Api:
                 vector = data["vector"]
                 address = data["address"]
                 camera_id = data["camera_id"]
+                camera = data["camera"]
                 try:
                     retval,buffer = cv2.imencode(".jpg",face )
                     string_bytes = b64encode(buffer)
                     data = {"image": string_bytes.decode('utf-8'), "camera_id": camera_id, "embeddings": np.array(vector[0]).astype("float64").tolist()}
                     res = requests.post(url="http://{}:8088/api/v2/user/recognize".format(address), json=data)
-                    # datas.put(res.json())
-                    datas.append(res.json())
-                    # if res != None:
-                    #     self.socketio.emit("result", res.json())
-                    # print(res.json())
+                    data = res.json()
+                    # print(data["data"]["accuracy"])
+                    if data["data"]["accuracy"] < 0.3:
+                        data.update({"image":string_bytes.decode('utf-8'),"camera":camera})
+                        datas.append(data)
+                    # print(datas)
                 except Exception as e:
+                    # print(e)
                     pass
 
 class Stream:
-    def __init__(self,online_camera):
+    def __init__(self):
         self.app = Flask("Face Recognition")
         
-        self.camera_list = online_camera
+        self.online_camera = {}
         self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self.clients = []
         self.frames = {}
@@ -118,39 +120,71 @@ class Stream:
         def connected():
             print("User {} connected".format(request.sid))
             emit("message","Connected to server")
+            emit("online_cameras", self.online_camera)
             self.clients.append(request.sid)
 
         @self.socketio.on('disconnect')
         def disconnect():
             print("{} Disconnected".format(request.sid))
             emit("message","Disconnected from server")
-            self.clients.remove(request.sid)
-
-        @self.socketio.on('online_camera')
-        def handle_message(message):
-            send(self.camera_list)
+            try:
+                self.clients.remove(request.sid)
+            except:
+                pass
+        
+        @self.socketio.on('multi-stream-stop')
+        def stopAllStream():
+            print("Stop")
+            self.multi_cam = False
+        
+        @self.socketio.on('multi-stream')
+        def getAll():
+            self.multi_cam = True
+            while self.multi_cam == True:
+                if not request.sid in self.clients:
+                    break
+                if len(self.frames) > 0:                   
+                    temp ={}
+                    for key in self.frames:
+                        frame = self.frames[key]["frame"]
+                        fps = self.frames[key]["frame_rate"]
+                        width = int(frame.shape[1] * 20 / 100)
+                        height = int(frame.shape[0] * 20 / 100)
+                        retval, buffer = cv2.imencode('.jpg', cv2.resize(frame,(width,height)))
+                        jpg_as_text = b64encode(buffer)
+                        temp.update({key:{"frame":jpg_as_text.decode("utf-8"),"fps":fps}})
+                    emit('multi-stream-recieve', temp)
+                    self.socketio.sleep(0.01)
+                else:
+                    break
+            print("Multi stream closed")
+            return
 
         @self.socketio.on('stream')
         def upstream(cam_id):
-            while request.sid in self.clients:
+            while True:
+                if not request.sid in self.clients:
+                    break
                 if len(datas) >0:
-                    emit("result",datas.pop())
+                    emit("result",datas)
+                    datas.clear()
                 if len(self.frames) > 0:
-                    # data = []
                     try:
-                        frame = self.frames[cam_id]
+                        frame = self.frames[str(cam_id)]["frame"]
+                        fps = self.frames[str(cam_id)]["frame_rate"]
                         width = int(frame.shape[1] * 40 / 100)
                         height = int(frame.shape[0] * 40 / 100)
                         retval, buffer = cv2.imencode('.jpg', cv2.resize(frame,(width,height)))
                         jpg_as_text = b64encode(buffer)
-                        emit('serverstream{}'.format(cam_id), jpg_as_text.decode("utf-8"))
+                        emit('serverstream{}'.format(cam_id), {"frame":jpg_as_text.decode("utf-8"),"fps":fps})
                         # if detection_result.not_empty:
                         #     emit("result", detection_result.get(), broadcast=True)
                     except Exception as e:
                         emit('message', 'Camera id doesnt exist')
-                        print(e)
-                        return 
+                        break 
                     self.socketio.sleep(0.01)
+                else:
+                    break
             return
 
     def stop(self):
@@ -235,7 +269,7 @@ class FaceDetector:
         for box in boxes:
             try:
                 (startX, startY, endX, endY) = box.astype("int")
-                cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 0, 255), 2)
+                cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 255, 0), 1)
             except:
                 (h, w) = frame.shape[:2]
                 for idx, bbox in enumerate(boxes):
@@ -262,20 +296,19 @@ class FacialRecognition:
         config = Config()
         configuration = config.ReadConfiguration()
         self.thread_list = []
-        self.online_camera =[]
-        stream = Stream(self.online_camera)
+        stream = Stream()
         socket = stream.StartStreaming()
-        stream.handle()
-        sender = Api(socket)
+        sender = Api()
         # sender.handlesocket()
         for config in configuration:
             print("Checking {}".format(config["name"]))
             if not self.check_video(config["address"]):
                 continue
-            self.online_camera.append(config["name"])
+            stream.online_camera.update({config["name"]:config["name"]})
             thread = Thread(target=self.main,args=(config,sender,stream))
             thread.setName(config["name"])
             self.thread_list.append(thread)
+        stream.handle()
         for thread in self.thread_list:
             thread.start()
         for thread in self.thread_list:
@@ -316,7 +349,7 @@ class FacialRecognition:
                         start = time.time()        
                         if type(vector) != None:
                             # if sender.data_queue.not_full:
-                            data = {"face":face,"vector":vector,"camera_id":camera_id,"address":config["server_ip"]}
+                            data = {"face":face,"vector":vector,"camera_id":camera_id,"address":config["server_ip"],"camera":config["name"]}
                             #     sender.data_queue.put(data)
                             t = Thread(target=sender.add_data,args=(data,))
                             t.daemon = True
@@ -329,12 +362,12 @@ class FacialRecognition:
                         start_time = time.time()
                         frame_count = 0
                 
-                try:
-                    detector.draw_overlay(frame,boxes,frame_rate)
-                except Exception as e:
-                    print(e)
+                # try:
+                    # detector.draw_overlay(frame,boxes,frame_rate)
+                # except Exception as e:
+                #     print(e)
                 frame_count += 1
-                stream.frames.update({config["name"]: frame})
+                stream.frames.update({config["name"]: {"frame":frame,"frame_rate":frame_rate}})
                 # print(len(stream.frames))
                 # cv2.imshow(config["name"],frame)
                 k = cv2.waitKey(1) & 0xFF

@@ -6,5 +6,13 @@
         "server_ip":"localhost",
         "recognition_per_second":5,
         "fps_update_interval_second":1
+    },
+    {
+        "id":"5d522f6f16171e56f400246e",
+        "name":"1",
+        "address":"rtsp://192.168.1.103:8089/h264_pcm.sdp",
+        "server_ip":"localhost",
+        "recognition_per_second":5,
+        "fps_update_interval_second":1
     }
 ]
